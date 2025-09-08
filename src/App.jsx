@@ -62,30 +62,29 @@ const App = () => {
   };
 
   const isAvailable = (name, date) => {
-  const inOffice = office.find((o) => o.name === name);
-  const onVacation = vacation.find((v) => v.name === name);
+    const inOffice = office.find((o) => o.name === name);
+    const onVacation = vacation.find((v) => v.name === name);
 
-  if (
-    inOffice &&
-    inOffice.from &&
-    inOffice.to &&
-    dayjs(date).isBetween(inOffice.from, inOffice.to, null, "[]")
-  ) {
-    return false;
-  }
+    if (
+      inOffice &&
+      inOffice.from &&
+      inOffice.to &&
+      dayjs(date).isBetween(inOffice.from, inOffice.to, null, "[]")
+    ) {
+      return false;
+    }
 
-  if (
-    onVacation &&
-    onVacation.from &&
-    onVacation.to &&
-    dayjs(date).isBetween(onVacation.from, onVacation.to, null, "[]")
-  ) {
-    return false;
-  }
+    if (
+      onVacation &&
+      onVacation.from &&
+      onVacation.to &&
+      dayjs(date).isBetween(onVacation.from, onVacation.to, null, "[]")
+    ) {
+      return false;
+    }
 
-  return true;
-};
-
+    return true;
+  };
 
   const createMonthlyPlan = () => {
     const days = getWeekdaysInMonth(month);
@@ -136,8 +135,27 @@ const App = () => {
       const sorted = eligible.sort((a, b) => counts[a] - counts[b]);
       const selected = [];
 
-      for (let name of sorted) {
-        if (selected.length < 4 && !usedToday.has(name)) {
+      let added = 0;
+      for (let i = 0; i < sorted.length && added < 4; i++) {
+        const name = sorted[i];
+        if (!usedToday.has(name)) {
+          selected.push(name);
+          usedToday.add(name);
+          counts[name]++;
+          if (!lastWeekDuties[name]) lastWeekDuties[name] = [];
+          lastWeekDuties[name].push(weekdayIndex);
+          added++;
+        }
+      }
+
+      // Eğer hala 4 kişi olmadıysa, kuralları esnetip uygun olan diğerlerinden ekle
+      if (selected.length < 4) {
+        const fallback = directors
+          .filter((name) => !usedToday.has(name))
+          .sort((a, b) => counts[a] - counts[b]);
+
+        for (let i = 0; i < fallback.length && selected.length < 4; i++) {
+          const name = fallback[i];
           selected.push(name);
           usedToday.add(name);
           counts[name]++;
