@@ -137,7 +137,7 @@ const App = () => {
       const selected = [];
 
       for (let name of sorted) {
-        if (selected.length < 2 && !usedToday.has(name)) {
+        if (selected.length < 4 && !usedToday.has(name)) {
           selected.push(name);
           usedToday.add(name);
           counts[name]++;
