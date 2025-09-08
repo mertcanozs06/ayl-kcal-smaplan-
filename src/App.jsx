@@ -25,6 +25,7 @@ const App = () => {
   const [vacation, setVacation] = useState([]);
   const [schedule, setSchedule] = useState([]);
   const [dutyCount, setDutyCount] = useState({});
+  const [monthlyDutyHistory, setMonthlyDutyHistory] = useState({}); // New state to store duty counts per month
 
   const DATE_FORMAT = "YYYY-MM-DD";
 
@@ -113,6 +114,17 @@ const App = () => {
 
     allPeople.forEach((name) => (counts[name] = 0));
 
+    // Get previous month's duty counts
+    const prevMonth = dayjs(month).subtract(1, "month").format("YYYY-MM");
+    const prevDutyCounts = monthlyDutyHistory[prevMonth] || {};
+
+    // Initialize target duties: 3 if prev month was 4, 4 if prev month was 3, else 4 for new people
+    const targetDuties = {};
+    allPeople.forEach((name) => {
+      const prevCount = prevDutyCounts[name] || 0;
+      targetDuties[name] = prevCount === 4 ? 3 : 4;
+    });
+
     days.forEach((day, index) => {
       const week = day.isoWeek();
       const weekdayIndex = day.day(); // 1-5 (Mon-Fri)
@@ -121,6 +133,7 @@ const App = () => {
 
       const eligible = allPeople.filter((name) => {
         if (!isAvailable(name, day.format(DATE_FORMAT))) return false;
+        if (counts[name] >= targetDuties[name]) return false; // Skip if target duties reached
 
         const workedLastWeek = lastWeekDuties[name] || [];
         if (workedLastWeek.includes(weekdayIndex)) return false;
@@ -144,7 +157,14 @@ const App = () => {
         return true;
       });
 
-      const sorted = eligible.sort((a, b) => counts[a] - counts[b]);
+      // Sort by remaining duties needed to reach target, then by total duties
+      const sorted = eligible.sort((a, b) => {
+        const remainingA = targetDuties[a] - counts[a];
+        const remainingB = targetDuties[b] - counts[b];
+        if (remainingA !== remainingB) return remainingB - remainingA; // Prioritize those needing more duties
+        return counts[a] - counts[b]; // Tiebreaker: fewer total duties
+      });
+
       const selected = [];
 
       let added = 0;
@@ -163,11 +183,35 @@ const App = () => {
       // Fallback if fewer than 4 people are selected
       if (selected.length < 4) {
         const fallback = allPeople
-          .filter((name) => !usedToday.has(name) && isAvailable(name, day.format(DATE_FORMAT)))
+          .filter(
+            (name) =>
+              !usedToday.has(name) &&
+              isAvailable(name, day.format(DATE_FORMAT)) &&
+              counts[name] < targetDuties[name]
+          )
           .sort((a, b) => counts[a] - counts[b]);
 
         for (let i = 0; i < fallback.length && selected.length < 4; i++) {
           const name = fallback[i];
+          selected.push(name);
+          usedToday.add(name);
+          counts[name]++;
+          if (!lastWeekDuties[name]) lastWeekDuties[name] = [];
+          lastWeekDuties[name].push(weekdayIndex);
+        }
+      }
+
+      // If still not enough, relax target duty constraint
+      if (selected.length < 4) {
+        const extraFallback = allPeople
+          .filter(
+            (name) =>
+              !usedToday.has(name) && isAvailable(name, day.format(DATE_FORMAT))
+          )
+          .sort((a, b) => counts[a] - counts[b]);
+
+        for (let i = 0; i < extraFallback.length && selected.length < 4; i++) {
+          const name = extraFallback[i];
           selected.push(name);
           usedToday.add(name);
           counts[name]++;
@@ -185,6 +229,11 @@ const App = () => {
 
     setSchedule(plan);
     setDutyCount(counts);
+    // Update duty history for the current month
+    setMonthlyDutyHistory((prev) => ({
+      ...prev,
+      [month]: counts,
+    }));
   };
 
   return (
