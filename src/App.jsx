@@ -1,28 +1,32 @@
 import React, { useState } from "react";
 import dayjs from "dayjs";
 import isBetween from "dayjs/plugin/isBetween";
+import isSameOrAfter from "dayjs/plugin/isSameOrAfter";
+import isSameOrBefore from "dayjs/plugin/isSameOrBefore";
+import customParseFormat from "dayjs/plugin/customParseFormat";
 import weekday from "dayjs/plugin/weekday";
 import isoWeek from "dayjs/plugin/isoWeek";
 import "./App.css";
 
 dayjs.extend(isBetween);
+dayjs.extend(isSameOrAfter);
+dayjs.extend(isSameOrBefore);
+dayjs.extend(customParseFormat);
 dayjs.extend(weekday);
 dayjs.extend(isoWeek);
 
 const App = () => {
   const [month, setMonth] = useState("2025-09");
-
   const [directorsInput, setDirectorsInput] = useState("");
   const [directors, setDirectors] = useState([]);
-
   const [officeNamesInput, setOfficeNamesInput] = useState("");
   const [office, setOffice] = useState([]);
-
   const [vacationNamesInput, setVacationNamesInput] = useState("");
   const [vacation, setVacation] = useState([]);
-
   const [schedule, setSchedule] = useState([]);
   const [dutyCount, setDutyCount] = useState({});
+
+  const DATE_FORMAT = "YYYY-MM-DD";
 
   const handleBulkAdd = (input, setList) => {
     const names = input
@@ -34,24 +38,27 @@ const App = () => {
 
   const handleDateChange = (list, setList, name, field, value) => {
     const updated = list.map((item) =>
-      item.name === name ? { ...item, [field]: value } : item
+      item.name === name ? { ...item, [field]: value || null } : item
     );
     setList(updated);
   };
 
   const initializeNameListWithDates = (names) =>
-    names.map((name) => ({
-      name,
-      from: "",
-      to: ""
-    }));
+    names
+      .map((name) => name.trim())
+      .filter(Boolean)
+      .map((name) => ({
+        name,
+        from: null,
+        to: null,
+      }));
 
   const getWeekdaysInMonth = (month) => {
     const start = dayjs(month).startOf("month");
     const end = dayjs(month).endOf("month");
     let days = [];
 
-    for (let day = start; day.isBefore(end); day = day.add(1, "day")) {
+    for (let day = start; day.isBefore(end) || day.isSame(end); day = day.add(1, "day")) {
       const dow = day.day();
       if (dow >= 1 && dow <= 5) {
         days.push(day);
@@ -61,25 +68,27 @@ const App = () => {
     return days;
   };
 
+  const isDateInRange = (date, from, to) => {
+    if (!from || !to) return false;
+
+    const d = dayjs(date, DATE_FORMAT, true);
+    const start = dayjs(from, DATE_FORMAT, true);
+    const end = dayjs(to, DATE_FORMAT, true);
+
+    if (!d.isValid() || !start.isValid() || !end.isValid()) return false;
+
+    return (d.isSame(start) || d.isAfter(start)) && (d.isSame(end) || d.isBefore(end));
+  };
+
   const isAvailable = (name, date) => {
     const inOffice = office.find((o) => o.name === name);
     const onVacation = vacation.find((v) => v.name === name);
 
-    if (
-      inOffice &&
-      inOffice.from &&
-      inOffice.to &&
-      dayjs(date).isBetween(inOffice.from, inOffice.to, null, "[]")
-    ) {
+    if (inOffice && isDateInRange(date, inOffice.from, inOffice.to)) {
       return false;
     }
 
-    if (
-      onVacation &&
-      onVacation.from &&
-      onVacation.to &&
-      dayjs(date).isBetween(onVacation.from, onVacation.to, null, "[]")
-    ) {
+    if (onVacation && isDateInRange(date, onVacation.from, onVacation.to)) {
       return false;
     }
 
@@ -93,22 +102,25 @@ const App = () => {
     const lastWeekDuties = {};
     const weekDayNames = ["Pzt", "Sal", "Çar", "Per", "Cum"];
 
-    directors.forEach((d) => (counts[d] = 0));
+    // Combine directors, office, and vacation names, ensuring uniqueness
+    const allPeople = [
+      ...new Set([
+        ...directors,
+        ...office.map((o) => o.name),
+        ...vacation.map((v) => v.name),
+      ]),
+    ];
 
-    let weekBuffer = {};
+    allPeople.forEach((name) => (counts[name] = 0));
 
     days.forEach((day, index) => {
       const week = day.isoWeek();
-      const weekdayIndex = day.day(); // 1-5
-
-      if (!weekBuffer[week]) {
-        weekBuffer[week] = [];
-      }
+      const weekdayIndex = day.day(); // 1-5 (Mon-Fri)
 
       const usedToday = new Set();
 
-      const eligible = directors.filter((name) => {
-        if (!isAvailable(name, day)) return false;
+      const eligible = allPeople.filter((name) => {
+        if (!isAvailable(name, day.format(DATE_FORMAT))) return false;
 
         const workedLastWeek = lastWeekDuties[name] || [];
         if (workedLastWeek.includes(weekdayIndex)) return false;
@@ -116,7 +128,7 @@ const App = () => {
         const prevDay = index > 0 ? days[index - 1] : null;
         if (prevDay) {
           const prevAssigned = plan.find(
-            (p) => p.date === prevDay.format("YYYY-MM-DD")
+            (p) => p.date === prevDay.format(DATE_FORMAT)
           );
           if (prevAssigned && prevAssigned.people.includes(name)) {
             const prevDayIndex = prevDay.day();
@@ -148,10 +160,10 @@ const App = () => {
         }
       }
 
-      // Eğer hala 4 kişi olmadıysa, kuralları esnetip uygun olan diğerlerinden ekle
+      // Fallback if fewer than 4 people are selected
       if (selected.length < 4) {
-        const fallback = directors
-          .filter((name) => !usedToday.has(name))
+        const fallback = allPeople
+          .filter((name) => !usedToday.has(name) && isAvailable(name, day.format(DATE_FORMAT)))
           .sort((a, b) => counts[a] - counts[b]);
 
         for (let i = 0; i < fallback.length && selected.length < 4; i++) {
@@ -165,9 +177,9 @@ const App = () => {
       }
 
       plan.push({
-        date: day.format("YYYY-MM-DD"),
+        date: day.format(DATE_FORMAT),
         day: weekDayNames[weekdayIndex - 1],
-        people: selected
+        people: selected,
       });
     });
 
@@ -189,15 +201,13 @@ const App = () => {
 
       <h3>🎬 Yönetmenleri Toplu Ekle</h3>
       <textarea
-        rows="3"
+        rows="5"
         placeholder="Ali, Ayşe, Mehmet..."
         value={directorsInput}
         onChange={(e) => setDirectorsInput(e.target.value)}
       />
       <br />
-      <button
-        onClick={() => handleBulkAdd(directorsInput, setDirectors)}
-      >
+      <button onClick={() => handleBulkAdd(directorsInput, setDirectors)}>
         Yönetmenleri Ekle
       </button>
       <ul>
@@ -208,7 +218,7 @@ const App = () => {
 
       <h3>🏢 Ofistekileri Ekle</h3>
       <textarea
-        rows="2"
+        rows="3"
         placeholder="Ahmet, Veli..."
         value={officeNamesInput}
         onChange={(e) => setOfficeNamesInput(e.target.value)}
@@ -228,7 +238,7 @@ const App = () => {
           <label>Başlangıç:</label>
           <input
             type="date"
-            value={person.from}
+            value={person.from || ""}
             onChange={(e) =>
               handleDateChange(office, setOffice, person.name, "from", e.target.value)
             }
@@ -236,7 +246,7 @@ const App = () => {
           <label>Bitiş:</label>
           <input
             type="date"
-            value={person.to}
+            value={person.to || ""}
             onChange={(e) =>
               handleDateChange(office, setOffice, person.name, "to", e.target.value)
             }
@@ -246,7 +256,7 @@ const App = () => {
 
       <h3>🏖️ İzindekileri Ekle</h3>
       <textarea
-        rows="2"
+        rows="3"
         placeholder="Fatma, Emre..."
         value={vacationNamesInput}
         onChange={(e) => setVacationNamesInput(e.target.value)}
@@ -266,7 +276,7 @@ const App = () => {
           <label>Başlangıç:</label>
           <input
             type="date"
-            value={person.from}
+            value={person.from || ""}
             onChange={(e) =>
               handleDateChange(vacation, setVacation, person.name, "from", e.target.value)
             }
@@ -274,7 +284,7 @@ const App = () => {
           <label>Bitiş:</label>
           <input
             type="date"
-            value={person.to}
+            value={person.to || ""}
             onChange={(e) =>
               handleDateChange(vacation, setVacation, person.name, "to", e.target.value)
             }
